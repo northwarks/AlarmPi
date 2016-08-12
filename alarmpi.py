@@ -10,6 +10,14 @@
 # USE AT YOUR OWN RISK - DON'T RISK/PROTECT LIFE/CRITICAL ASSESTS WITH IT!
 #--------------------------------------------------------------------------
 
+#--------------------------------------------------------------------------
+#Python to manage garage alarms and door bell
+#sends notification out to Instapush
+#logs to RRD
+# Open/Close may be reversed if code started with door(s) open  
+# Version 1.2 12.08.2016
+#--------------------------------------------------------------------------
+
 #External Imports
 import RPi.GPIO as GPIO
 import time
@@ -26,7 +34,7 @@ import urllib2
 import os
 
 #Define Instapush App Details
-app = App(appid=‘SOMESECRETKEY’, secret=‘SOMESECRETKEY’)
+app = App(appid='SOMESECRET', secret='SOMESECRET')
 
 #Define GPIO Numbering
 GPIO.setmode(GPIO.BCM)
@@ -37,12 +45,14 @@ PIN_GARAGE_DOOR = 17
 PIN_DOOR_BELL = 21
 PIN_SHUT_DOWN = 18
 PIN_WIFI_LED = 19
+PIN_ALARM = 16
 PIN_TEMP_HUMID = 4 #ONLY HERE AS A REMARK AS DHT Module sets GPIO as 4
 
 #Setup GPIO Pins
 GPIO.setup(PIN_GARAGE_DOOR, GPIO.IN, pull_up_down=GPIO.PUD_UP)    # set 17 as input with pull up res
 GPIO.setup(PIN_DOOR_BELL, GPIO.IN, pull_up_down=GPIO.PUD_UP)    # set 21 as input with pull up res
 GPIO.setup(PIN_SHUT_DOWN, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # set 18 as input with pull up res
+GPIO.setup(PIN_ALARM, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # set 16 as input with pull up res
 GPIO.setup(PIN_WIFI_LED, GPIO.OUT)
 
 #Define Variables
@@ -75,6 +85,12 @@ def garage_callback(channel):
 #Define a threaded callback to watch the doorbell
 def door_callback(channel):
   door_bell()
+
+#Define a threaded callback to watch the alarm output
+def alarm_callback(channel):
+  alarm()
+
+
 #----------------------------
 # function for door open
 def door_open():
@@ -93,13 +109,14 @@ def door_close():
     global CLOSE_TIME
     global OPEN_TIME
     CLOSE_TIME = datetime.datetime.now().replace(microsecond=0)
+    OPEN_DURATION = calc_time(CLOSE_TIME, OPEN_TIME)
     ts = time.time()
     timestamp = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')	
-    alertmsg = timestamp + " - Garage Door Closed"
+    alertmsg = timestamp + " - Garage Door Closed, " + OPEN_DURATION
     global alert_type 
     alert_type = "GarageDoorAlert" 
     Send_Alert(alert_type, alertmsg)
-    calc_time(CLOSE_TIME, OPEN_TIME)
+#    calc_time(CLOSE_TIME, OPEN_TIME)
 #---------------------------
 #function for door bell
 def door_bell():
@@ -110,7 +127,14 @@ def door_bell():
     alert_type = "DoorBell"
     Send_Alert(alert_type, alertmsg)	
 #---------------------------
-
+def alarm():
+    ts = time.time()
+    timestamp = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+    alertmsg = timestamp + " - Alarm !"
+    global alart_type
+    alert_type = "Alarm"
+    Send_Alert(alert_type, alertmsg)
+#---------------------------
 # lets set some initial time values
 # prevent a crash on initial start
 def set_initial_time():
@@ -122,12 +146,12 @@ def set_initial_time():
 def calc_time(T1, T2):
     difference = T1 - T2
 #    print ("Garage Door Open for - " + str(difference))
-    OPEN_FOR = ("Garage Door Open for - " + str(difference))
+    OPEN_FOR = ("Garage Door Was Open for - " + str(difference))
     WriteAlarmLog(OPEN_FOR)
 #reset times
     OPEN_TIME = 0
     CLOSE_TIME = 0
-    return
+    return OPEN_FOR
 #---- send notification--------
 def SendAlertMod(ALERT_TYPE, ALERT_MESSAGE):
   if (app.notify(event_name= ALERT_TYPE, trackers={ 'message': ALERT_MESSAGE})) is True:
@@ -237,6 +261,7 @@ def Shutdown(channel):
 GPIO.add_event_detect(PIN_GARAGE_DOOR, GPIO.BOTH, callback=garage_callback, bouncetime=2000)
 GPIO.add_event_detect(PIN_DOOR_BELL, GPIO.FALLING, callback=door_callback, bouncetime=2000)
 GPIO.add_event_detect(PIN_SHUT_DOWN, GPIO.FALLING, callback = Shutdown, bouncetime = 2000)
+GPIO.add_event_detect(PIN_ALARM, GPIO.FALLING, callback = alarm_callback, bouncetime = 2000)
 #============================================================================
 
 #Runs non-stop
